@@ -16,9 +16,9 @@ def make_provider(settings: Settings) -> LLMProvider:
         # so the loop stays usable until that lands.
         return PlaceholderProvider()
     if settings.default_provider == "lmstudio":
-        # LM Studio adapter not implemented yet; placeholder keeps the loop
-        # usable while config wiring is verified.
-        return PlaceholderProvider()
+        from aibridge_houdini.providers.lmstudio_provider import LMStudioProvider
+
+        return LMStudioProvider(settings)
     raise ProviderError(f"unknown provider: {settings.default_provider}")
 
 
