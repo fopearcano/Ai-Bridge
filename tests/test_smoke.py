@@ -20,13 +20,13 @@ def env_with_anthropic(monkeypatch, tmp_path):
     return tmp_path
 
 
-def test_placeholder_provider_returns_structured_response():
+def test_placeholder_provider_returns_strict_plan():
     provider = PlaceholderProvider()
-    response = provider.generate(UserRequest(text="make a pyro sim"))
-    assert response.request.text == "make a pyro sim"
-    assert len(response.actions) == 1
-    assert response.executed is False
-    assert response.actions[0].intent == "unknown"
+    plan = provider.generate(UserRequest(text="make a pyro sim"))
+    assert plan.intent == "unknown"
+    assert plan.risk_level == "low"
+    assert plan.requires_houdini is False
+    assert "make a pyro sim" in plan.summary
 
 
 def test_main_loop_handles_exit(monkeypatch, env_with_anthropic):

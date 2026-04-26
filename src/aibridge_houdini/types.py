@@ -2,28 +2,31 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
-Intent = Literal["create", "modify", "query", "unknown"]
+RiskLevel = Literal["low", "medium", "high"]
 
 
 class UserRequest(BaseModel):
     text: str
 
 
-class HoudiniAction(BaseModel):
-    """A single planned operation against the Houdini scene."""
+class LLMPlan(BaseModel):
+    """Strict structured output produced by an LLM provider."""
 
-    intent: Intent = "unknown"
-    summary: str = ""
-    python_code: str = ""
+    intent: str
+    summary: str
+    risk_level: RiskLevel
+    requires_houdini: bool
+    houdini_python: str
+    explanation: str
+    expected_result: str
 
 
 class BridgeResponse(BaseModel):
-    """Structured response returned by the bridge for one user turn."""
+    """One full bridge turn: the user request and the plan returned by the LLM."""
 
     request: UserRequest
-    actions: list[HoudiniAction] = Field(default_factory=list)
-    explanation: str = ""
+    plan: LLMPlan
     executed: bool = False

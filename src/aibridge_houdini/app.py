@@ -6,8 +6,8 @@ import sys
 from aibridge_houdini import __version__
 from aibridge_houdini.config import ConfigError, Settings
 from aibridge_houdini.logging_setup import setup_logging
-from aibridge_houdini.providers.placeholder import PlaceholderProvider
-from aibridge_houdini.types import UserRequest
+from aibridge_houdini.providers import ProviderError, make_provider
+from aibridge_houdini.types import BridgeResponse, UserRequest
 from aibridge_houdini.ui.cli import EXIT_WORDS, read_user_input, render_response
 
 
@@ -50,8 +50,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{k}: {v}")
         return 0
 
-    provider = PlaceholderProvider()
-    print(f"Ai-Bridge Houdini v{__version__} (skeleton). Type 'exit' to quit.")
+    try:
+        provider = make_provider(settings)
+    except ProviderError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    print(
+        f"Ai-Bridge Houdini v{__version__} ({provider.name}). Type 'exit' to quit."
+    )
 
     while True:
         text = read_user_input()
@@ -64,12 +71,17 @@ def main(argv: list[str] | None = None) -> int:
         if text.lower() in EXIT_WORDS:
             break
 
+        request = UserRequest(text=text)
         try:
-            response = provider.generate(UserRequest(text=text))
+            plan = provider.generate(request)
+        except ProviderError as e:
+            log.error("provider failed: %s", e)
+            continue
         except Exception:
-            log.exception("provider failed")
+            log.exception("unexpected provider error")
             continue
 
+        response = BridgeResponse(request=request, plan=plan, executed=False)
         log.debug("response: %s", response.model_dump())
         print(render_response(response))
 
