@@ -6,8 +6,8 @@ import sys
 from aibridge_houdini import __version__
 from aibridge_houdini.config import ConfigError, Settings
 from aibridge_houdini.logging_setup import setup_logging
-from aibridge_houdini.providers import ProviderError, make_provider
-from aibridge_houdini.types import BridgeResponse, UserRequest
+from aibridge_houdini.providers import ProviderRouter, RouterError
+from aibridge_houdini.types import UserRequest
 from aibridge_houdini.ui.cli import EXIT_WORDS, read_user_input, render_response
 
 
@@ -51,13 +51,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        provider = make_provider(settings)
-    except ProviderError as e:
+        router = ProviderRouter(settings)
+    except RouterError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
     print(
-        f"Ai-Bridge Houdini v{__version__} ({provider.name}). Type 'exit' to quit."
+        f"Ai-Bridge Houdini v{__version__} (active: {router.active}). "
+        "Type 'exit' to quit, '/help' for commands."
     )
 
     while True:
@@ -71,19 +72,53 @@ def main(argv: list[str] | None = None) -> int:
         if text.lower() in EXIT_WORDS:
             break
 
-        request = UserRequest(text=text)
-        try:
-            plan = provider.generate(request)
-        except ProviderError as e:
-            log.error("provider failed: %s", e)
-            continue
-        except Exception:
-            log.exception("unexpected provider error")
+        if text.startswith("/"):
+            handle_slash_command(text, router)
             continue
 
-        response = BridgeResponse(request=request, plan=plan, executed=False)
-        log.debug("response: %s", response.model_dump())
-        print(render_response(response))
+        request = UserRequest(text=text)
+        try:
+            command = router.route(request)
+        except RouterError as e:
+            log.error("router failed: %s", e)
+            print(f"error: {e}", file=sys.stderr)
+            continue
+        except Exception:
+            log.exception("unexpected router error")
+            continue
+
+        log.debug("command: %s", command.model_dump())
+        print(render_response(command))
 
     log.info("shutting down")
     return 0
+
+
+def handle_slash_command(text: str, router: ProviderRouter) -> None:
+    parts = text.split(maxsplit=1)
+    cmd = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if cmd == "/provider":
+        if not arg:
+            print(f"active: {router.active}")
+            print(f"enabled: {', '.join(router.enabled)}")
+            return
+        try:
+            router.set_provider(arg)
+        except RouterError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return
+        print(f"switched to: {router.active}")
+        return
+
+    if cmd in ("/help", "/?"):
+        print("commands:")
+        print("  /provider                 show active and enabled providers")
+        print("  /provider <openai|anthropic|lmstudio>")
+        print("                            switch the active provider")
+        print("  /help                     show this list")
+        print("  exit | quit | :q          leave")
+        return
+
+    print(f"unknown command: {cmd} (try /help)", file=sys.stderr)

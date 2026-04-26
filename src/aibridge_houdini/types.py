@@ -24,9 +24,33 @@ class LLMPlan(BaseModel):
     expected_result: str
 
 
-class BridgeResponse(BaseModel):
-    """One full bridge turn: the user request and the plan returned by the LLM."""
+class Command(BaseModel):
+    """Normalized command produced by the router for one user turn.
 
-    request: UserRequest
-    plan: LLMPlan
-    executed: bool = False
+    This is the bridge's single output unit: an executable plan plus the
+    metadata needed to display, log, or hand off to the execution layer.
+    """
+
+    provider: str
+    request: str
+    intent: str
+    summary: str
+    risk_level: RiskLevel
+    requires_houdini: bool
+    houdini_python: str
+    explanation: str
+    expected_result: str
+
+    @classmethod
+    def from_plan(cls, provider: str, request: UserRequest, plan: LLMPlan) -> "Command":
+        return cls(
+            provider=provider,
+            request=request.text,
+            intent=plan.intent,
+            summary=plan.summary,
+            risk_level=plan.risk_level,
+            requires_houdini=plan.requires_houdini,
+            houdini_python=plan.houdini_python,
+            explanation=plan.explanation,
+            expected_result=plan.expected_result,
+        )

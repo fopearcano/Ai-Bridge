@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-
-from aibridge_houdini.types import BridgeResponse
+from typing import Any
 
 
 PROMPT = "ai-bridge> "
@@ -16,5 +15,5 @@ def read_user_input() -> str | None:
         return None
 
 
-def render_response(response: BridgeResponse) -> str:
-    return json.dumps(response.model_dump(), indent=2, ensure_ascii=False)
+def render_response(obj: Any) -> str:
+    return json.dumps(obj.model_dump(), indent=2, ensure_ascii=False)

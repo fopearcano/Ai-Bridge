@@ -3,6 +3,7 @@
 from aibridge_houdini.config import Settings
 from aibridge_houdini.providers.base import LLMProvider, ProviderError
 from aibridge_houdini.providers.placeholder import PlaceholderProvider
+from aibridge_houdini.providers.router import ProviderRouter, RouterError
 
 
 def make_provider(settings: Settings) -> LLMProvider:
@@ -22,4 +23,11 @@ def make_provider(settings: Settings) -> LLMProvider:
     raise ProviderError(f"unknown provider: {settings.default_provider}")
 
 
-__all__ = ["LLMProvider", "ProviderError", "PlaceholderProvider", "make_provider"]
+__all__ = [
+    "LLMProvider",
+    "ProviderError",
+    "PlaceholderProvider",
+    "ProviderRouter",
+    "RouterError",
+    "make_provider",
+]
