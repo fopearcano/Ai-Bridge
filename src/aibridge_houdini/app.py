@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import logging
+import sys
 
 from aibridge_houdini import __version__
-from aibridge_houdini.config import Settings
+from aibridge_houdini.config import ConfigError, Settings
 from aibridge_houdini.logging_setup import setup_logging
 from aibridge_houdini.providers.placeholder import PlaceholderProvider
 from aibridge_houdini.types import UserRequest
@@ -20,14 +20,35 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--env-file", default=".env", help="Path to .env file (default: .env)"
     )
+    parser.add_argument(
+        "--check-config",
+        action="store_true",
+        help="Validate configuration, print a sanitized summary, and exit.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    settings = Settings.load(env_file=args.env_file)
+    try:
+        settings = Settings.load(env_file=args.env_file)
+    except ConfigError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
     log = setup_logging(settings.log_level, settings.log_dir)
-    log.info("aibridge-houdini %s starting (provider=%s)", __version__, settings.provider)
+    log.info(
+        "aibridge-houdini %s starting (mode=%s, provider=%s)",
+        __version__,
+        settings.mode,
+        settings.default_provider,
+    )
+    log.debug("settings: %s", settings.safe_summary())
+
+    if args.check_config:
+        for k, v in settings.safe_summary().items():
+            print(f"{k}: {v}")
+        return 0
 
     provider = PlaceholderProvider()
     print(f"Ai-Bridge Houdini v{__version__} (skeleton). Type 'exit' to quit.")
