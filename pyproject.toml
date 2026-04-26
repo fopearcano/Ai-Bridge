@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aibridge-houdini"
+version = "0.0.1"
+description = "Bridge from natural language to executable Houdini Python via LLM providers."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+aibridge-houdini = "aibridge_houdini.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
