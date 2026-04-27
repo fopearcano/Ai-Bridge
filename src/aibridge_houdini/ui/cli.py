@@ -34,6 +34,20 @@ def render_response(obj: Any) -> str:
     return json.dumps(obj.model_dump(), indent=2, ensure_ascii=False)
 
 
+def render_clarification(command: Command) -> str:
+    """Render a clarification turn (no code, no safety, no execution)."""
+    lines = [
+        f"provider: {command.provider}",
+        "intent:   clarification",
+    ]
+    question = (command.question or "").strip()
+    if not question:
+        # Defensive: a well-formed clarification always has a question.
+        question = "(no question provided)"
+    lines.append(f"question: {question}")
+    return "\n".join(lines)
+
+
 def render_turn(
     command: Command,
     safety: SafetyReport,

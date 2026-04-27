@@ -23,6 +23,8 @@ SYSTEM_INSTRUCTION = (
 JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
+    # OpenAI strict mode: every declared property must appear in `required`.
+    # Optional-by-intent fields are expressed as `["string", "null"]`.
     "required": [
         "intent",
         "summary",
@@ -31,6 +33,7 @@ JSON_SCHEMA: dict[str, Any] = {
         "houdini_python",
         "explanation",
         "expected_result",
+        "question",
     ],
     "properties": {
         "intent": {"type": "string"},
@@ -40,6 +43,8 @@ JSON_SCHEMA: dict[str, Any] = {
         "houdini_python": {"type": "string"},
         "explanation": {"type": "string"},
         "expected_result": {"type": "string"},
+        # Non-null only when intent == "clarification".
+        "question": {"type": ["string", "null"]},
     },
 }
 

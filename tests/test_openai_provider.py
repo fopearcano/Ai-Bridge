@@ -172,3 +172,42 @@ def _make_openai_error(name: str) -> Exception:
             continue
     # Last resort: bypass __init__
     return cls.__new__(cls)
+
+
+# ---- clarification + scene context support -----------------------------
+
+
+def test_json_schema_supports_clarification_shape():
+    """The strict JSON schema must allow `question` so the model can
+    return the {intent: clarification, requires_houdini: false,
+    question: ...} shape under OpenAI strict structured outputs."""
+    assert "question" in JSON_SCHEMA["properties"]
+    assert JSON_SCHEMA["properties"]["question"]["type"] == ["string", "null"]
+    # OpenAI strict mode requires every declared property to be `required`.
+    assert "question" in JSON_SCHEMA["required"]
+
+
+def test_generate_returns_clarification_plan(monkeypatch):
+    """When the LLM emits a clarification payload, the provider returns
+    it without execution and without requiring the seven plan fields to
+    carry meaningful values."""
+    settings = _settings(monkeypatch)
+    clar = {
+        "intent": "clarification",
+        "summary": "",
+        "risk_level": "low",
+        "requires_houdini": False,
+        "houdini_python": "",
+        "explanation": "",
+        "expected_result": "",
+        "question": "What size sphere?",
+    }
+    client = MagicMock()
+    client.responses.create.return_value = _fake_response(clar)
+
+    provider = OpenAIProvider(settings, client=client, sleep=lambda _s: None)
+    plan = provider.generate(UserRequest(text="make something"))
+
+    assert plan.intent == "clarification"
+    assert plan.requires_houdini is False
+    assert plan.question == "What size sphere?"

@@ -445,3 +445,102 @@ def test_scene_context_fn_failure_falls_back_to_plain_prompt(monkeypatch):
     assert cmd.intent == 'plain'
     assert fake.calls[0].text == SPHERE_PROMPT  # no augmentation
 
+
+
+# ---- clarification flow ------------------------------------------------
+
+
+def test_router_returns_clarification_command(monkeypatch):
+    s = _all_providers_settings(monkeypatch, default="openai")
+    clar = LLMPlan(
+        intent="clarification",
+        requires_houdini=False,
+        question="Polygon or NURBS sphere?",
+    )
+    fake = FakeProvider("openai", clar)
+    router = ProviderRouter(s, providers={"openai": fake})
+
+    cmd = router.route(UserRequest(text="make a sphere maybe"))
+
+    assert cmd.is_clarification
+    assert cmd.intent == "clarification"
+    assert cmd.requires_houdini is False
+    assert cmd.question == "Polygon or NURBS sphere?"
+    assert cmd.houdini_python == ""
+    assert cmd.request == "make a sphere maybe"
+
+
+def test_main_loop_handles_clarification(monkeypatch, tmp_path):
+    """End-to-end: when the LLM asks for clarification, the app prints
+    the question and does NOT run safety or execute anything."""
+    monkeypatch.setenv("PROVIDERS", "openai,anthropic,lmstudio")
+    monkeypatch.setenv("DEFAULT_PROVIDER", "lmstudio")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-abcdefgh12345678")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-abcdefgh12345678")
+    monkeypatch.setenv("LMSTUDIO_MODEL", "qwen2.5-coder-7b")
+    monkeypatch.setenv("AIBRIDGE_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("HYTHON_PATH", str(tmp_path / "hython"))  # bridge available
+
+    inputs = iter(["make something cool", "exit"])
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    from aibridge_houdini.providers import lmstudio_provider as lm_mod
+
+    fake_client = MagicMock()
+    minimal_clarification = json.dumps(
+        {
+            "intent": "clarification",
+            "requires_houdini": False,
+            "question": "What kind of cool thing? Geometry, lighting, or simulation?",
+        }
+    )
+    fake_client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=minimal_clarification))]
+    )
+    monkeypatch.setattr(lm_mod, "_build_default_client", lambda *_a, **_k: fake_client)
+
+    # Spy on the safety + execution layer to confirm they're NOT called.
+    from aibridge_houdini import app as app_mod
+    safety_calls: list = []
+    exec_calls: list = []
+    real_evaluate = app_mod.evaluate
+    monkeypatch.setattr(
+        app_mod,
+        "evaluate",
+        lambda *a, **kw: (safety_calls.append((a, kw)) or real_evaluate(*a, **kw)),
+    )
+
+    out_buf, err_buf = io.StringIO(), io.StringIO()
+    with redirect_stdout(out_buf), redirect_stderr(err_buf):
+        rc = app_mod.main(["--env-file", str(tmp_path / "missing.env")])
+
+    assert rc == 0
+    out = out_buf.getvalue()
+    assert "intent:   clarification" in out
+    assert "question: What kind of cool thing?" in out
+    # The safety gate must have been skipped on the clarification turn.
+    assert safety_calls == [], f"safety was unexpectedly called: {safety_calls}"
+    # And no code/result block (which would mention 'safety:'/'result:').
+    assert "safety:" not in out
+    assert "result:" not in out
+    fake_client.chat.completions.create.assert_called_once()
+
+
+def test_app_renders_clarification_helper(monkeypatch):
+    """Unit-level: render_clarification produces the expected layout."""
+    from aibridge_houdini.ui.cli import render_clarification
+
+    cmd = Command(
+        provider="anthropic",
+        request="rotate it",
+        intent="clarification",
+        requires_houdini=False,
+        question="Around which axis?",
+    )
+    rendered = render_clarification(cmd)
+    assert "provider: anthropic" in rendered
+    assert "intent:   clarification" in rendered
+    assert "question: Around which axis?" in rendered
+    # Must not mention safety/code/result for a clarification.
+    assert "code:" not in rendered
+    assert "result:" not in rendered

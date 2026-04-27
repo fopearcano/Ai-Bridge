@@ -19,6 +19,7 @@ from aibridge_houdini.ui.cli import (
     EXIT_WORDS,
     confirm_execute,
     read_user_input,
+    render_clarification,
     render_turn,
 )
 
@@ -135,6 +136,11 @@ def process_request(text: str, session: Session) -> None:
     except Exception:
         session.log.exception("unexpected router error")
         print("error: unexpected router error (see log)", file=sys.stderr)
+        return
+
+    if command.is_clarification:
+        session.log.info("clarification from %s: %s", command.provider, command.question)
+        print(render_clarification(command))
         return
 
     safety = evaluate(command.houdini_python, mode=session.mode)

@@ -253,3 +253,25 @@ def _make_openai_error(name: str) -> Exception:
         except TypeError:
             continue
     return cls.__new__(cls)
+
+
+def test_generate_accepts_minimal_clarification_payload(monkeypatch):
+    """LM Studio uses json_object response_format, not strict schema —
+    the model can emit the 3-field clarification shape directly."""
+    settings = _settings(monkeypatch)
+    minimal = {
+        "intent": "clarification",
+        "requires_houdini": False,
+        "question": "Should the sphere be polygon or NURBS?",
+    }
+    client = MagicMock()
+    client.chat.completions.create.return_value = _fake_response(json.dumps(minimal))
+
+    provider = LMStudioProvider(settings, client=client, sleep=lambda _s: None)
+    plan = provider.generate(UserRequest(text="make a sphere maybe"))
+
+    assert plan.intent == "clarification"
+    assert plan.requires_houdini is False
+    assert plan.question == "Should the sphere be polygon or NURBS?"
+    # Other text fields default to empty strings — clients ignore them.
+    assert plan.houdini_python == ""
