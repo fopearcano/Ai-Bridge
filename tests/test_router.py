@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 from contextlib import redirect_stdout, redirect_stderr
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -281,6 +282,15 @@ def test_router_lazily_constructs_providers_on_switch(monkeypatch):
 # ---- /provider slash command --------------------------------------------
 
 
+def _session(settings, router):
+    return app.Session(
+        settings=settings,
+        router=router,
+        bridge=None,
+        log=logging.getLogger("aibridge.test"),
+    )
+
+
 def test_slash_provider_switches_via_app_handler(monkeypatch, capsys):
     s = _all_providers_settings(monkeypatch, default="openai")
     router = ProviderRouter(
@@ -292,7 +302,7 @@ def test_slash_provider_switches_via_app_handler(monkeypatch, capsys):
         },
     )
 
-    app.handle_slash_command("/provider lmstudio", router)
+    app.handle_slash_command("/provider lmstudio", _session(s, router))
     out = capsys.readouterr().out
     assert "switched to: lmstudio" in out
     assert router.active == "lmstudio"
@@ -304,7 +314,7 @@ def test_slash_provider_no_arg_shows_state(monkeypatch, capsys):
         s, providers={"anthropic": FakeProvider("anthropic", _plan("a"))}
     )
 
-    app.handle_slash_command("/provider", router)
+    app.handle_slash_command("/provider", _session(s, router))
     out = capsys.readouterr().out
     assert "active: anthropic" in out
     assert "openai" in out and "lmstudio" in out
@@ -316,7 +326,7 @@ def test_slash_provider_unknown_prints_error(monkeypatch, capsys):
         s, providers={"openai": FakeProvider("openai", _plan("x"))}
     )
 
-    app.handle_slash_command("/provider groq", router)
+    app.handle_slash_command("/provider groq", _session(s, router))
     err = capsys.readouterr().err
     assert "error" in err
     assert "groq" in err
@@ -329,7 +339,7 @@ def test_slash_help_prints_command_list(monkeypatch, capsys):
         s, providers={"openai": FakeProvider("openai", _plan("x"))}
     )
 
-    app.handle_slash_command("/help", router)
+    app.handle_slash_command("/help", _session(s, router))
     out = capsys.readouterr().out
     assert "/provider" in out
     assert "openai" in out and "anthropic" in out and "lmstudio" in out
@@ -341,7 +351,7 @@ def test_slash_unknown_command_reports_error(monkeypatch, capsys):
         s, providers={"openai": FakeProvider("openai", _plan("x"))}
     )
 
-    app.handle_slash_command("/whatever", router)
+    app.handle_slash_command("/whatever", _session(s, router))
     err = capsys.readouterr().err
     assert "/whatever" in err
 
@@ -358,7 +368,6 @@ def test_main_loop_supports_slash_provider(monkeypatch, tmp_path):
     inputs = iter(["/provider lmstudio", SPHERE_PROMPT, "exit"])
     monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
 
-    # Patch the LM Studio adapter's HTTP client builder so no network is touched.
     from aibridge_houdini.providers import lmstudio_provider as lm_mod
 
     fake_client = MagicMock()
@@ -372,6 +381,7 @@ def test_main_loop_supports_slash_provider(monkeypatch, tmp_path):
     assert rc == 0
     out = out_buf.getvalue()
     assert "switched to: lmstudio" in out
-    assert '"provider": "lmstudio"' in out
-    assert SPHERE_PROMPT in out  # echoed back via Command.request
+    assert "provider: lmstudio" in out
+    # The plan's summary is rendered in the new turn output.
+    assert SPHERE_JSON["summary"] in out
     fake_client.chat.completions.create.assert_called_once()
