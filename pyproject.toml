@@ -17,6 +17,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+gui = [
+    "PySide6>=6.6",
+]
 
 [project.scripts]
 aibridge-houdini = "aibridge_houdini.app:main"

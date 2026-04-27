@@ -51,6 +51,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--env-file", default=".env", help="Path to .env file (default: .env)"
     )
     parser.add_argument(
+        "--ui",
+        choices=("cli", "qt"),
+        default="cli",
+        help="Interface to launch (default: cli).",
+    )
+    parser.add_argument(
         "--check-config",
         action="store_true",
         help="Validate configuration, print a sanitized summary, and exit.",
@@ -79,6 +85,19 @@ def main(argv: list[str] | None = None) -> int:
         for k, v in settings.safe_summary().items():
             print(f"{k}: {v}")
         return 0
+
+    if args.ui == "qt":
+        # Lazy import so the CLI still works without PySide6 installed.
+        try:
+            from aibridge_houdini.ui.qt_app import run as run_qt
+        except ImportError as e:
+            print(
+                f"error: PySide6 not installed ({e}); "
+                "install with `pip install aibridge-houdini[gui]`",
+                file=sys.stderr,
+            )
+            return 2
+        return run_qt(env_file=args.env_file)
 
     try:
         router = ProviderRouter(
