@@ -10,6 +10,7 @@ from aibridge_houdini import __version__
 from aibridge_houdini.config import ConfigError, Mode, Settings
 from aibridge_houdini.execution.safety import SafetyReport, evaluate
 from aibridge_houdini.houdini.bridge import HoudiniBridge
+from aibridge_houdini.houdini.scene_client import fetch_scene_context
 from aibridge_houdini.houdini.transport import ExecutionResult, TransportError
 from aibridge_houdini.logging_setup import setup_logging
 from aibridge_houdini.providers import ProviderRouter, RouterError
@@ -79,7 +80,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        router = ProviderRouter(settings)
+        router = ProviderRouter(
+            settings,
+            scene_context_fn=_make_scene_context_fn(settings, log),
+        )
     except RouterError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -267,3 +271,31 @@ def _try_build_bridge(settings: Settings, log: logging.Logger) -> HoudiniBridge 
             e,
         )
         return None
+
+
+def _make_scene_context_fn(settings: Settings, log: logging.Logger):
+    """Return a callable the router invokes once per turn to fetch scene state.
+
+    Talks to the in-Houdini receiver at HOUDINI_HOST/HOUDINI_PORT. If the
+    receiver is unreachable (no Houdini running, port closed) the call
+    returns None and the prompt is sent without context — never raises.
+    """
+
+    host = settings.houdini_host
+    port = settings.houdini_port
+
+    def _fetch() -> dict | None:
+        ctx = fetch_scene_context(host, port, timeout=2.0)
+        if ctx is None:
+            log.debug("no scene context (receiver unreachable at %s:%d)", host, port)
+        else:
+            log.debug(
+                "fetched scene context: frame=%s objects=%d cameras=%d lights=%d",
+                ctx.get("frame"),
+                len(ctx.get("objects") or []),
+                len(ctx.get("cameras") or []),
+                len(ctx.get("lights") or []),
+            )
+        return ctx
+
+    return _fetch

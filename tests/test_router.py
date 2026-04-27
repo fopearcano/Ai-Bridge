@@ -385,3 +385,63 @@ def test_main_loop_supports_slash_provider(monkeypatch, tmp_path):
     # The plan's summary is rendered in the new turn output.
     assert SPHERE_JSON["summary"] in out
     fake_client.chat.completions.create.assert_called_once()
+
+# ---- scene context injection -------------------------------------------
+
+
+def test_scene_context_is_appended_to_user_prompt(monkeypatch):
+    s = _all_providers_settings(monkeypatch, default='openai')
+    fake = FakeProvider('openai', _plan('with-context'))
+    ctx = {'frame': 7.0, 'objects': [{'path': '/obj/cam1', 'type': 'cam'}]}
+    router = ProviderRouter(
+        s, providers={'openai': fake}, scene_context_fn=lambda: ctx
+    )
+
+    cmd = router.route(UserRequest(text=SPHERE_PROMPT))
+
+    assert cmd.intent == 'with-context'
+    # Command preserves the original prompt — context is for the LLM only.
+    assert cmd.request == SPHERE_PROMPT
+    # The actual call to the provider had context appended.
+    sent = fake.calls[0].text
+    assert sent.startswith(SPHERE_PROMPT)
+    assert 'Live Houdini scene context' in sent
+    assert '/obj/cam1' in sent
+    assert '"frame": 7' in sent
+
+
+def test_no_scene_context_fn_means_no_augmentation(monkeypatch):
+    s = _all_providers_settings(monkeypatch, default='openai')
+    fake = FakeProvider('openai', _plan('plain'))
+    router = ProviderRouter(s, providers={'openai': fake})
+
+    router.route(UserRequest(text=SPHERE_PROMPT))
+
+    assert fake.calls[0].text == SPHERE_PROMPT
+
+
+def test_scene_context_fn_returning_none_does_not_augment(monkeypatch):
+    s = _all_providers_settings(monkeypatch, default='openai')
+    fake = FakeProvider('openai', _plan('plain'))
+    router = ProviderRouter(
+        s, providers={'openai': fake}, scene_context_fn=lambda: None
+    )
+
+    router.route(UserRequest(text=SPHERE_PROMPT))
+
+    assert fake.calls[0].text == SPHERE_PROMPT
+
+
+def test_scene_context_fn_failure_falls_back_to_plain_prompt(monkeypatch):
+    s = _all_providers_settings(monkeypatch, default='openai')
+    fake = FakeProvider('openai', _plan('plain'))
+
+    def boom():
+        raise RuntimeError('receiver unreachable')
+
+    router = ProviderRouter(s, providers={'openai': fake}, scene_context_fn=boom)
+    cmd = router.route(UserRequest(text=SPHERE_PROMPT))
+
+    assert cmd.intent == 'plain'
+    assert fake.calls[0].text == SPHERE_PROMPT  # no augmentation
+

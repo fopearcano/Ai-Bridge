@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
-from typing import Mapping
+from typing import Callable, Mapping
 
 from aibridge_houdini.config import Settings
 from aibridge_houdini.providers.base import LLMProvider, ProviderError
@@ -9,6 +10,9 @@ from aibridge_houdini.types import Command, UserRequest
 
 
 log = logging.getLogger("aibridge.providers.router")
+
+
+SceneContextFn = Callable[[], dict | None]
 
 
 class RouterError(RuntimeError):
@@ -25,6 +29,20 @@ REPAIR_HINT = (
 )
 
 
+SCENE_CONTEXT_HEADER = (
+    "Live Houdini scene context (JSON snapshot from the running session — "
+    "use this to ground your plan; do NOT echo it back):"
+)
+
+
+def _augment_with_context(text: str, context: dict | None) -> str:
+    """Append a JSON scene-context block to the user prompt if non-empty."""
+    if not context:
+        return text
+    blob = json.dumps(context, indent=2, ensure_ascii=False, default=str)
+    return f"{text}\n\n{SCENE_CONTEXT_HEADER}\n```json\n{blob}\n```"
+
+
 class ProviderRouter:
     """Selects an LLM provider, sends prompts, and normalizes the response.
 
@@ -37,6 +55,7 @@ class ProviderRouter:
         self,
         settings: Settings,
         providers: Mapping[str, LLMProvider] | None = None,
+        scene_context_fn: SceneContextFn | None = None,
     ) -> None:
         self._settings = settings
         self._cache: dict[str, LLMProvider] = dict(providers) if providers else {}
@@ -47,6 +66,7 @@ class ProviderRouter:
                 f"PROVIDERS={','.join(settings.providers)}"
             )
         self._active: str = settings.default_provider
+        self._scene_context_fn = scene_context_fn
 
     @property
     def active(self) -> str:
@@ -69,17 +89,28 @@ class ProviderRouter:
 
     def route(self, request: UserRequest) -> Command:
         provider = self._build(self._active)
-        log.info("route -> %s (len=%d)", provider.name, len(request.text))
+
+        scene_context = self._safe_fetch_context()
+        augmented_text = _augment_with_context(request.text, scene_context)
+        augmented = (
+            request if augmented_text is request.text else UserRequest(text=augmented_text)
+        )
+        log.info(
+            "route -> %s (len=%d, scene_context=%s)",
+            provider.name,
+            len(augmented.text),
+            "yes" if scene_context else "no",
+        )
 
         try:
-            plan = provider.generate(request)
+            plan = provider.generate(augmented)
             return Command.from_plan(provider.name, request, plan)
         except ProviderError as e:
             log.warning("router: %s failed (%s); attempting auto-repair", provider.name, e)
         except Exception as e:
             log.warning("router: %s raised %s; attempting auto-repair", provider.name, e)
 
-        repair_request = UserRequest(text=f"{request.text}\n\n{REPAIR_HINT}")
+        repair_request = UserRequest(text=f"{augmented.text}\n\n{REPAIR_HINT}")
         try:
             plan = provider.generate(repair_request)
             log.info("router: auto-repair succeeded for %s", provider.name)
@@ -88,6 +119,19 @@ class ProviderRouter:
             raise RouterError(
                 f"{provider.name} failed after auto-repair: {e}"
             ) from e
+
+    def _safe_fetch_context(self) -> dict | None:
+        if self._scene_context_fn is None:
+            return None
+        try:
+            ctx = self._scene_context_fn()
+        except Exception as e:
+            log.warning("scene_context_fn raised %s; sending request without context", e)
+            return None
+        if ctx and not isinstance(ctx, dict):
+            log.warning("scene_context_fn returned %r; expected dict", type(ctx).__name__)
+            return None
+        return ctx or None
 
     def _build(self, name: str) -> LLMProvider:
         if name in self._cache:

@@ -215,3 +215,93 @@ def test_oversized_message_rejected_by_helper():
     with pytest.raises(ValueError) as exc:
         _read_message(fake_sock)
     assert "exceeds limit" in str(exc.value)
+
+
+# ---- inspect_scene dispatch ---------------------------------------------
+
+
+def _hou_with_obj_root(*, frame=12.0, children=()):
+    obj_root = SimpleNamespace(
+        path=lambda: "/obj",
+        name=lambda: "obj",
+        type=lambda: SimpleNamespace(
+            name=lambda: "manager",
+            category=lambda: SimpleNamespace(name=lambda: "Manager"),
+        ),
+        children=lambda c=children: tuple(c),
+    )
+    return SimpleNamespace(
+        frame=lambda v=frame: v,
+        fps=lambda: 24.0,
+        hipFile=SimpleNamespace(path=lambda: ""),
+        node=lambda p, root=obj_root: root if p == "/obj" else None,
+        selectedNodes=lambda: (),
+    )
+
+
+def test_inspect_direct_returns_scene_data():
+    rx = HoudiniReceiver(host="127.0.0.1", port=0, hou_module=_hou_with_obj_root())
+    try:
+        result = rx.inspect(request_id="ins-1")
+    finally:
+        rx.server_close()
+
+    assert result["request_id"] == "ins-1"
+    assert result["success"] is True
+    assert result["error"] is None
+    assert isinstance(result["data"], dict)
+    assert result["data"]["available"] is True
+    assert result["data"]["frame"] == 12.0
+
+
+def test_roundtrip_inspect_scene():
+    rx = HoudiniReceiver(host="127.0.0.1", port=0, hou_module=_hou_with_obj_root(frame=7.0))
+    rx.start_in_background()
+    host, port = rx.server_address
+    try:
+        response = _roundtrip(
+            host, port, {"type": "inspect_scene", "request_id": "rt-ins"}
+        )
+    finally:
+        rx.stop()
+
+    assert response["request_id"] == "rt-ins"
+    assert response["success"] is True
+    assert response["error"] is None
+    assert isinstance(response["data"], dict)
+    assert response["data"]["frame"] == 7.0
+    for key in ("objects", "selected_nodes", "cameras", "lights", "geo_containers"):
+        assert key in response["data"]
+
+
+def test_roundtrip_inspect_scene_without_hou():
+    rx = HoudiniReceiver(host="127.0.0.1", port=0, hou_module=None)
+    rx.start_in_background()
+    host, port = rx.server_address
+    try:
+        response = _roundtrip(
+            host, port, {"type": "inspect_scene", "request_id": "no-hou"}
+        )
+    finally:
+        rx.stop()
+
+    assert response["success"] is True
+    assert response["data"]["available"] is False
+    assert response["data"]["error"] == "hou module not available"
+
+
+def test_roundtrip_unknown_type_is_rejected(running_receiver):
+    host, port = running_receiver
+    response = _roundtrip(host, port, {"type": "delete_everything", "request_id": "x"})
+    assert response["success"] is False
+    assert "unknown request type" in (response["error"] or "").lower()
+
+
+def test_roundtrip_exec_response_includes_data_field(running_receiver):
+    host, port = running_receiver
+    response = _roundtrip(
+        host, port, {"code": "print('ok')", "request_id": "with-data"}
+    )
+    assert response["success"] is True
+    assert "data" in response
+    assert response["data"] is None  # exec replies always carry data=None

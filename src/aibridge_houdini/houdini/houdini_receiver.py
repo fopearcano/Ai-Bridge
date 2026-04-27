@@ -113,9 +113,15 @@ class _Handler(socketserver.BaseRequestHandler):
             if not isinstance(request, dict):
                 raise TypeError("request must be a JSON object")
             request_id = str(request.get("request_id", ""))
-            code = request.get("code", "")
-            if not isinstance(code, str):
-                raise TypeError("'code' must be a string")
+            msg_type = (request.get("type") or "exec").lower()
+            if msg_type == "exec":
+                code = request.get("code", "")
+                if not isinstance(code, str):
+                    raise TypeError("'code' must be a string")
+            elif msg_type == "inspect_scene":
+                code = None
+            else:
+                raise ValueError(f"unknown request type: {msg_type!r}")
         except (json.JSONDecodeError, TypeError, ValueError) as e:
             self._reply(
                 request_id,
@@ -123,11 +129,16 @@ class _Handler(socketserver.BaseRequestHandler):
                 stdout="",
                 stderr="",
                 error=f"bad request: {e}",
+                data=None,
             )
             return
 
-        log.info("exec request_id=%s len=%d", request_id, len(code))
-        result = self.server.execute(code, request_id)  # type: ignore[attr-defined]
+        if msg_type == "inspect_scene":
+            log.info("inspect_scene request_id=%s", request_id)
+            result = self.server.inspect(request_id)  # type: ignore[attr-defined]
+        else:
+            log.info("exec request_id=%s len=%d", request_id, len(code))
+            result = self.server.execute(code, request_id)  # type: ignore[attr-defined]
         self._reply(**result)
 
     def _reply(
@@ -138,6 +149,7 @@ class _Handler(socketserver.BaseRequestHandler):
         stdout: str,
         stderr: str,
         error: str | None,
+        data: Any = None,
     ) -> None:
         payload = json.dumps(
             {
@@ -146,6 +158,7 @@ class _Handler(socketserver.BaseRequestHandler):
                 "stdout": stdout,
                 "stderr": stderr,
                 "error": error,
+                "data": data,
             },
             ensure_ascii=False,
         )
@@ -230,6 +243,7 @@ class HoudiniReceiver(socketserver.ThreadingTCPServer):
                 "stdout": "",
                 "stderr": "",
                 "error": tb,
+                "data": None,
             }
 
         try:
@@ -242,6 +256,7 @@ class HoudiniReceiver(socketserver.ThreadingTCPServer):
                 "stdout": out_buf.getvalue(),
                 "stderr": err_buf.getvalue(),
                 "error": f"SystemExit({e.code!r})",
+                "data": None,
             }
         except BaseException:
             tb = traceback.format_exc()
@@ -252,6 +267,7 @@ class HoudiniReceiver(socketserver.ThreadingTCPServer):
                 "stdout": out_buf.getvalue(),
                 "stderr": err_buf.getvalue(),
                 "error": tb,
+                "data": None,
             }
 
         return {
@@ -260,6 +276,47 @@ class HoudiniReceiver(socketserver.ThreadingTCPServer):
             "stdout": out_buf.getvalue(),
             "stderr": err_buf.getvalue(),
             "error": None,
+            "data": None,
+        }
+
+    # -- inspect_scene -----------------------------------------------------
+
+    def inspect(self, request_id: str) -> dict:
+        """Snapshot the current scene via houdini.inspection."""
+        # Imported lazily so the receiver still loads if inspection.py is
+        # missing (defensive — both files normally ship together).
+        try:
+            from aibridge_houdini.houdini.inspection import inspect_scene
+        except ImportError as e:
+            return {
+                "request_id": request_id,
+                "success": False,
+                "stdout": "",
+                "stderr": "",
+                "error": f"inspection module unavailable: {e}",
+                "data": None,
+            }
+
+        try:
+            scene = inspect_scene(self._hou)
+        except BaseException:
+            tb = traceback.format_exc()
+            log.warning("inspect failed for request_id=%s", request_id)
+            return {
+                "request_id": request_id,
+                "success": False,
+                "stdout": "",
+                "stderr": "",
+                "error": tb,
+                "data": None,
+            }
+        return {
+            "request_id": request_id,
+            "success": True,
+            "stdout": "",
+            "stderr": "",
+            "error": None,
+            "data": scene,
         }
 
 
